@@ -11,7 +11,7 @@ Create a Streamlit application that allows users to access and analyze data from
 + Streamlit
 + postgreSQL
 
-## Approach:
+# Approach:
 + Set up a Streamlit app for a user-friendly interface.
 + Connect to the YouTube API to retrieve channel and video data.
 + Store data in MongoDB for flexibility with unstructured data.
