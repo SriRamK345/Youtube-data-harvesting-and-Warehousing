@@ -4,6 +4,7 @@ import pymongo #mongoDB import
 import mysql.connector #MY SQL 
 import pandas as pd #pandas
 import streamlit as st #streamlit
+from streamlit_option_menu import option_menu
 
 
 # BUILDING CONNECTION WITH YOUTUBE API
@@ -249,9 +250,22 @@ def videos_table(selected_channel):
             video.append(i["Video_Details"][j])
     df=pd.DataFrame(video)
 
-    for Index, row in df.iterrows():    # Assume df1 is DataFrame
+    for _ , row in df.iterrows():    # Assume df1 is DataFrame
         published_at = datetime.strptime(row['PublishedAt'], '%Y-%m-%dT%H:%M:%SZ') 
-    
+        duration = row['Duration']  # Original duration string from MongoDB
+        # Convert duration format
+        duration = duration[2:]  # Remove the 'PT' prefix
+        hours, minutes, seconds = 0, 0, 0
+        if 'H' in duration:
+            hours = int(duration.split('H')[0])
+            duration = duration.split('H')[1]
+        if 'M' in duration:
+            minutes = int(duration.split('M')[0])
+            duration = duration.split('M')[1]
+        if 'S' in duration:
+            seconds = int(duration.split('S')[0])
+        formatted_duration = '{:02d}:{:02d}:{:02d}'.format(hours, minutes, seconds)  # Format into HH:MM:SS
+        
         insert_qry = """
         INSERT INTO videos ( channelName, channelId,  videoId, VideoName, Thumbnail, 
         description, publishedAt, duration, viewCount, likeCount, commentCount, definition, caption)
@@ -266,7 +280,7 @@ def videos_table(selected_channel):
         row['Thumbnail'],
         row['Description'],
         published_at,
-        row['Duration'],
+        formatted_duration,
         row['Views_count'],
         row['Like_count'],
         row['Comments'],
@@ -333,7 +347,7 @@ def all_tables(selected_channel):
     channels_table(selected_channel)
     videos_table(selected_channel)
     comment_table(selected_channel)
-    return ("Completed!!")
+    return ("Migatred to SQL sucessfully")
 
 def display_channels():                         # Function to display channels table
     channel= []
@@ -372,25 +386,30 @@ def display_comments():                         # Function to display comments t
 st.title(":red[YouTube Data Harvesting and Warehousing using SQL, MongoDB and Streamlit]")
 
 with st.sidebar:  
-    st.subheader("**:green[Data Collection]**")
-    channel_id = st.text_input("Enter the Channel ID:")
-    if st.button("**Collect and Store Data**"):
-        if not channel_id:
-            st.warning("Please enter a valid Channel ID")
-        else:
-            channel_ids = []
-            dbase = client["youtube_details"]
-            collect1 = dbase["combined_data"]
-            data = collect1.find({}, {"_id": 0, "Channel_Details": 1})
-            for i in data:
-                channel_ids.append(i["Channel_Details"]["Channel_Id"])
-
-            if channel_id in channel_ids:
-                st.warning(f"Channel details of the given channel id '{channel_id}'' already exist")
+    selected = option_menu("Menu", ["Data Collection","Table View","SQL Query"])
+    if selected == "Data Collection":
+        #st.subheader("**:green[Data Collection]**")
+        channel_id = st.text_input("Enter the Channel ID:")
+        if st.button("**Collect and Store Data**"):
+            if not channel_id:
+                st.warning("Please enter a valid Channel ID")
             else:
-                combine_data(channel_id,selected_channel)
-                st.success(f"Data for the given channel ID '{channel_id}' collected and stored in Mongo DB.")
-        
+                channel_ids = []
+                dbase = client["youtube_details"]
+                collect1 = dbase["combined_data"]
+                data = collect1.find({}, {"_id": 0, "Channel_Details": 1})
+                for i in data:
+                    channel_ids.append(i["Channel_Details"]["Channel_Id"])
+
+                if channel_id in channel_ids:
+                    st.warning(f"Channel details of the given channel id '{channel_id}' already exist")
+                else:
+                    channels = [i["Channel_Details"]["Channel_Name"] for i in data]
+                    selected_channel = ("Select Channel:", channels)
+                    combine_data(channel_id, selected_channel)
+                    st.success(f"Data for the given channel ID '{channel_id}' collected and stored in Mongo DB.")
+
+if selected =="Table View":
     # Dropdown to view existing channels
     st.subheader("**:green[Channels list in Mongo DB]**")
     dbase = client["youtube_details"]
@@ -398,65 +417,56 @@ with st.sidebar:
     data=collect1.find({},{"_id":0,"Channel_Details":1})
     channels = [i["Channel_Details"]["Channel_Name"] for i in data]
     selected_channel = st.selectbox("Select Channel:", channels, index=0)
-    
-    # Display selected channel details
-    if selected_channel:
-        st.info("Click the below button to migrate channel datas to SQL.")
-
     # Migrate from MongoDB to SQL
     if st.sidebar.button("**Migrate to SQL**"):
-        table=all_tables(selected_channel)
-        st.success(table)
+        try:
+            table = all_tables(selected_channel)
+            st.success(table)
+        except:
+            #pass
+            st.warning(f"The channel '{selected_channel}' already exists in SQL database.")
 
-    #show_table = st.selectbox("Select table to view",("CHANNELS","VIDEOS","COMMENTS"))
     st.subheader("**:green[Select Table and Section]**")
-    show_table = st.selectbox("Datas in MONGO DB in Table format", ("------","CHANNELS", "VIDEOS", "COMMENTS"))
+    # Show date in MONGO DB
+    show_table = st.selectbox("Data's in MONGO DB in Table format", ("------","CHANNELS", "VIDEOS", "COMMENTS"))
+    # Show date in SQL
+    selected_section = st.selectbox("Data's in SQL in Table format", ("------","CHANNELS TABLE", "VIDEOS TABLE", "COMMENTS TABLE"))
 
-    selected_section = st.selectbox("Datas in SQL in Table format", ("------","CHANNELS TABLE", "VIDEOS TABLE", "COMMENTS TABLE"))
-    # Create a button in the sidebar
-    if st.sidebar.button("**SQL Query Selector**"):
-        st.session_state.show_sql_selector = True
+    if show_table == "CHANNELS":
+        st.subheader("**:blue[CHANNEL DETAILS IN MONGO DB]**")
+        display_channels()
+    elif show_table == "VIDEOS":
+        st.subheader("**:blue[VIDEO DETAILS IN MONGO DB]**")
+        display_videos()
+    elif show_table == "COMMENTS":
+        st.subheader("**:blue[COMMENT DETAILS IN MONGO DB]**")
+        display_comments()
 
-if show_table == "CHANNELS":
-    st.subheader("**:blue[CHANNEL DETAILS IN MONGO DB]**")
-    display_channels()
-elif show_table == "VIDEOS":
-    st.subheader("**:blue[VIDEO DETAILS IN MONGO DB]**")
-    display_videos()
-elif show_table == "COMMENTS":
-    st.subheader("**:blue[COMMENT DETAILS IN MONGO DB]**")
-    display_comments()
+    # Display SQL tables
+    if selected_section == "CHANNELS TABLE":
+        st.subheader("**:blue[CHANNEL DETAILS IN SQL]**")
+        cursor.execute("SELECT * FROM channels")
+        df_channels = pd.DataFrame(cursor.fetchall(), columns=["channelName", "channelId", "subscribers", "views", "totalVideos", "channel_description", "playlistId"])
+        st.write(df_channels)
 
-# Display SQL tables
-if selected_section == "CHANNELS TABLE":
-    st.subheader("**:blue[CHANNEL DETAILS IN SQL]**")
-    cursor.execute("SELECT * FROM channels")
-    df_channels = pd.DataFrame(cursor.fetchall(), columns=["channelName", "channelId", "subscribers", "views", "totalVideos", "channel_description", "playlistId"])
-    st.write(df_channels)
+    if selected_section == "VIDEOS TABLE":
+        st.subheader("**:blue[VIDEOS DETAILS IN SQL]**")
+        cursor.execute("SELECT * FROM videos")
+        df_videos = pd.DataFrame(cursor.fetchall(), columns=["channelName", "channelId",  "videoId", "VideoName", "Thumbnail", 
+                "description", "publishedAt", "duration", "viewCount", "likeCount", "commentCount", "definition", "caption"])
+        st.write(df_videos)
 
-if selected_section == "VIDEOS TABLE":
-    st.subheader("**:blue[VIDEOS DETAILS IN SQL]**")
-    cursor.execute("SELECT * FROM videos")
-    df_videos = pd.DataFrame(cursor.fetchall(), columns=["channelName", "channelId",  "videoId", "VideoName", "Thumbnail", 
-            "description", "publishedAt", "duration", "viewCount", "likeCount", "commentCount", "definition", "caption"])
-    st.write(df_videos)
+    if selected_section == "COMMENTS TABLE":
+        st.subheader("**:blue[COMMENTS DETAILS IN SQL]**")
+        cursor.execute("SELECT * FROM comments")
+        df_comments = pd.DataFrame(cursor.fetchall(), columns=["Comment_id","video_id","Comment_text","author","posted_date"])
+        st.write(df_comments)                                       
 
-if selected_section == "COMMENTS TABLE":
-    st.subheader("**:blue[COMMENTS DETAILS IN SQL]**")
-    cursor.execute("SELECT * FROM comments")
-    df_comments = pd.DataFrame(cursor.fetchall(), columns=["Comment_id","video_id","Comment_text","author","posted_date"])
-    st.write(df_comments)
-
-# Check if the button is clicked and show the SQL query selector
-if "show_sql_selector" not in st.session_state:
-    st.session_state.show_sql_selector = False
-question_tosql = None  # Define question_tosql outside the conditional block
-
-# Selectbox creation
-if st.session_state.show_sql_selector:   
+elif selected == "SQL Query":
+ 
     st.subheader("**:blue[SQL QUERY]**")
     question_tosql = st.selectbox('**Select any question**',
-    ('1. What are the names of all the videos and their corresponding channels?',
+('1. What are the names of all the videos and their corresponding channels?',
 '2. Which channels have the most number of videos, and how many videos do they have?',
 '3. What are the top 10 most viewed videos and their respective channels?',
 '4. How many comments were made on each video, and what are their corresponding video names?',
@@ -467,60 +477,52 @@ if st.session_state.show_sql_selector:
 '9. What is the average duration of all videos in each channel, and what are their corresponding channel names?',
 '10. Which videos have the highest number of comments, and what are their corresponding channel names?'))
 
-if question_tosql=="1. What are the names of all the videos and their corresponding channels?":
-    cursor.execute("""SELECT VideoName AS Video_Title, channelName AS Channel_Name FROM videos ORDER BY channelName""")  
-    df = pd.DataFrame(cursor.fetchall(),columns=["Video_Title","Channel_Name"])
-    st.write(df)
+    if question_tosql=="1. What are the names of all the videos and their corresponding channels?":
+        cursor.execute("""SELECT VideoName AS Video_Title, channelName AS Channel_Name FROM videos ORDER BY channelName""")  
+        df = pd.DataFrame(cursor.fetchall(),columns=["Video_Title","Channel_Name"])
+        st.write(df)
 
-elif question_tosql=="2. Which channels have the most number of videos, and how many videos do they have?":
-    cursor.execute("""SELECT channelName AS Channel_Name, totalVideos AS Total_Videos FROM channels ORDER BY totalVideos DESC""")
-    df1= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Total_Videos"])
-    st.write(df1)
+    elif question_tosql=="2. Which channels have the most number of videos, and how many videos do they have?":
+        cursor.execute("""SELECT channelName AS Channel_Name, totalVideos AS Total_Videos FROM channels ORDER BY totalVideos DESC""")
+        df1= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Total_Videos"])
+        st.write(df1)
 
-elif question_tosql == "3. What are the top 10 most viewed videos and their respective channels?":
-    cursor.execute("""SELECT channelName AS Channel_Name, VideoName AS Video_Title, viewCount AS Views  FROM videos ORDER BY viewCount DESC LIMIT 10""")
-    df2= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Video_Title","Views"])
-    st.write(df2)
+    elif question_tosql == "3. What are the top 10 most viewed videos and their respective channels?":
+        cursor.execute("""SELECT channelName AS Channel_Name, VideoName AS Video_Title, viewCount AS Views  FROM videos ORDER BY viewCount DESC LIMIT 10""")
+        df2= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Video_Title","Views"])
+        st.write(df2)
 
-elif question_tosql == "4. How many comments were made on each video, and what are their corresponding video names?":
-    cursor.execute("""SELECT commentCount as Comments, VideoName as Video_Name from videos where commentCount is not null AND commentCount <> 0""")
-    df3= pd.DataFrame(cursor.fetchall(),columns=["Comments","Video_Name"])
-    st.write(df3)
+    elif question_tosql == "4. How many comments were made on each video, and what are their corresponding video names?":
+        cursor.execute("""SELECT commentCount as Comments, VideoName as Video_Name from videos where commentCount is not null AND commentCount <> 0""")
+        df3= pd.DataFrame(cursor.fetchall(),columns=["Comments","Video_Name"])
+        st.write(df3)
 
-elif question_tosql == "5. Which videos have the highest number of likes, and what are their corresponding channel names?":
-    cursor.execute("""SELECT channelName AS Channel_Name, VideoName AS Title, likeCount AS Likes_Count FROM videos ORDER BY likeCount DESC LIMIT 10""")
-    df4= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Title","Likes_Count"])
-    st.write(df4)
+    elif question_tosql == "5. Which videos have the highest number of likes, and what are their corresponding channel names?":
+        cursor.execute("""SELECT channelName AS Channel_Name, VideoName AS Title, likeCount AS Likes_Count FROM videos ORDER BY likeCount DESC LIMIT 10""")
+        df4= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Title","Likes_Count"])
+        st.write(df4)
 
-elif question_tosql == "6. What is the total number of likes and dislikes for each video, and what are their corresponding video names?":
-    cursor.execute("""SELECT VideoName AS Title, likeCount AS Likes_Count FROM videos ORDER BY likeCount DESC""")
-    df5= pd.DataFrame(cursor.fetchall(),columns=["Title","Likes_Count"])
-    st.write(df5)
+    elif question_tosql == "6. What is the total number of likes and dislikes for each video, and what are their corresponding video names?":
+        cursor.execute("""SELECT VideoName AS Title, likeCount AS Likes_Count FROM videos ORDER BY likeCount DESC""")
+        df5= pd.DataFrame(cursor.fetchall(),columns=["Title","Likes_Count"])
+        st.write(df5)
 
-elif question_tosql == "7. What is the total number of views for each channel, and what are their corresponding channel names?":
-    cursor.execute("""SELECT channelName AS Channel_Name, views AS Views FROM channels ORDER BY views DESC""")
-    df6= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Views"])
-    st.write(df6)
+    elif question_tosql == "7. What is the total number of views for each channel, and what are their corresponding channel names?":
+        cursor.execute("""SELECT channelName AS Channel_Name, views AS Views FROM channels ORDER BY views DESC""")
+        df6= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Views"])
+        st.write(df6)
 
-elif question_tosql == "8. What are the names of all the channels that have published videos in the year 2022?":
-    cursor.execute("""SELECT channelName AS Channel_Name FROM videos WHERE publishedAt LIKE '2022%' GROUP BY channelName ORDER BY channelName""")
-    df7= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name"])
-    st.write(df7)
+    elif question_tosql == "8. What are the names of all the channels that have published videos in the year 2022?":
+        cursor.execute("""SELECT channelName AS Channel_Name FROM videos WHERE publishedAt LIKE '2022%' GROUP BY channelName ORDER BY channelName""")
+        df7= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name"])
+        st.write(df7)
 
-elif question_tosql == "9. What is the average duration of all videos in each channel, and what are their corresponding channel names?":
-    cursor.execute("""SELECT videos.channelName, TIME_FORMAT(SEC_TO_TIME(AVG(TIME_TO_SEC(CONCAT(
-                        SUBSTRING_INDEX(SUBSTRING_INDEX(videos.duration, 'PT', -1), 'M', 1) * 60,
-                        SUBSTRING_INDEX(SUBSTRING_INDEX(videos.duration, 'M', -1), 'S', 1))))),'%H:%i:%s') AS duration FROM videos 
-                        JOIN channels ON channels.channelId = videos.channelId
-                        GROUP BY channelName
-                        ORDER BY duration DESC""")
-    df8= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","duration"])
-    st.write(df8)
+    elif question_tosql == "9. What is the average duration of all videos in each channel, and what are their corresponding channel names?":
+        cursor.execute("""SELECT videos.channelName, MAX(videos.duration) AS duration FROM videos JOIN channels ON channels.channelId = videos.channelId GROUP BY videos.channelName ORDER BY duration DESC""")
+        df8= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","duration"])
+        st.write(df8)
 
-elif question_tosql == "10. Which videos have the highest number of comments, and what are their corresponding channel names?":
-    cursor.execute("""SELECT channelName AS Channel_Name,videoId AS Video_ID, commentCount AS Comments FROM videos ORDER BY commentCount DESC LIMIT 10""")
-    df9= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Video_ID","Comments"])
-    st.write(df9)
-
-# SQL DB connection close
-conn.close()
+    elif question_tosql == "10. Which videos have the highest number of comments, and what are their corresponding channel names?":
+        cursor.execute("""SELECT channelName AS Channel_Name,videoId AS Video_ID, commentCount AS Comments FROM videos ORDER BY commentCount DESC LIMIT 10""")
+        df9= pd.DataFrame(cursor.fetchall(),columns=["Channel_Name","Video_ID","Comments"])
+        st.write(df9)
